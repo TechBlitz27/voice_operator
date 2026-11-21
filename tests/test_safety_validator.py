@@ -118,90 +118,58 @@ def test_llm_cannot_supply_force_close_parameter():
 
 
 def test_positive_confirmation_variations():
-    """Task 4: Verifies explicit positive confirmations authorize execution."""
-    from src.orchestrator import Orchestrator
-    from src.adapters.mocks.speech_mock import MockAudioSource, MockVAD
-    
-    positive_phrases = ["yes", "yes please", "confirm", "do it", "force close", "close it"]
+    positive_phrases = ["yes", "yeah", "yep", "confirm", "proceed", "sure", "haan", "sahi", "haanji"]
     for phrase in positive_phrases:
         os_ctrl = MockOSController()
         tts = MockSpeechSynthesizer()
         mm = ModeManager(MockLLMProvider(), os_ctrl, tts)
-        orch = Orchestrator(MockAudioSource(), MockVAD(), None, tts, mm)
-        
-        # Set pending confirmation state
-        orch.confirm_state = "action_confirm"
-        orch.pending_confirm_action = {
+
+        assert mm.route({
             "intent_confidence": 0.95,
             "action": "delete_file",
             "target": "test.txt",
             "parameters": {},
-            "requires_confirmation": True,
-        }
-        
-        result = orch._handle_confirmation_input(phrase)
-        assert result["status"] == "executed_confirmed"
-        assert orch.confirm_state is None
-        assert orch.pending_confirm_action is None
+        })["status"] == "awaiting_confirmation"
+
+        result = mm.route_transcript(phrase)
+        assert result["status"] == "completed"
+        assert mm._pending_confirmation_action is None
+        assert len(os_ctrl.executed_actions) == 1
 
 
 def test_negative_confirmation_variations():
-    """Task 4: Verifies explicit negative confirmations cancel execution safely."""
-    from src.orchestrator import Orchestrator
-    from src.adapters.mocks.speech_mock import MockAudioSource, MockVAD
-    
-    negative_phrases = ["no", "no thanks", "cancel", "don't", "stop"]
+    negative_phrases = ["no", "nope", "cancel", "stop", "nahi", "mat karo"]
     for phrase in negative_phrases:
         os_ctrl = MockOSController()
         tts = MockSpeechSynthesizer()
         mm = ModeManager(MockLLMProvider(), os_ctrl, tts)
-        orch = Orchestrator(MockAudioSource(), MockVAD(), None, tts, mm)
-        
-        orch.confirm_state = "action_confirm"
-        orch.pending_confirm_action = {
+
+        assert mm.route({
             "intent_confidence": 0.95,
             "action": "delete_file",
             "target": "test.txt",
             "parameters": {},
-            "requires_confirmation": True,
-        }
-        
-        result = orch._handle_confirmation_input(phrase)
-        assert result["status"] == "canceled"
-        assert orch.confirm_state is None
-        assert orch.pending_confirm_action is None
+        })["status"] == "awaiting_confirmation"
+
+        result = mm.route_transcript(phrase)
+        assert result["status"] == "confirmation_rejected"
+        assert mm._pending_confirmation_action is None
         assert len(os_ctrl.executed_actions) == 0
 
 
 def test_unrelated_command_while_confirmation_pending_preserves_safety_and_routes_command():
-    """Task 4: An unrelated command spoken during confirmation cancels pending action and executes new command."""
-    from src.orchestrator import Orchestrator
-    from src.adapters.mocks.speech_mock import MockAudioSource, MockVAD
-    
+    """A new command cancels the pending action and is routed by the state machine."""
     os_ctrl = MockOSController()
     tts = MockSpeechSynthesizer()
     mm = ModeManager(MockLLMProvider(), os_ctrl, tts)
-    orch = Orchestrator(MockAudioSource(), MockVAD(), None, tts, mm)
-    
-    # System asked: "Would you like to force close Excel?"
-    orch.confirm_state = "force_close_confirm"
-    orch.pending_confirm_action = {
-        "intent_confidence": 0.95,
-        "action": "close_app",
-        "target": "excel",
-        "parameters": {},
-        "requires_confirmation": True,
-    }
-    
-    # User speaks "Start dictating."
-    result = orch._handle_confirmation_input("start dictating")
-    
-    # Must NOT force close Excel
-    assert orch.confirm_state is None
-    assert orch.pending_confirm_action is None
-    assert not any(act["action"] == "close_app" for act in os_ctrl.executed_actions)
-    
-    # Must enter Dictation Mode without swallowing the command
+    mm.route_transcript("close unsaved_word")
+    assert mm._pending_confirmation_action is not None
+
+    result = mm.route_transcript("start dictating")
+
+    assert mm._pending_confirmation_action is None
+    assert len(os_ctrl.executed_actions) == 1
+    assert os_ctrl.executed_actions[0]["parameters"] == {}
     assert mm.current_mode == "dictation"
     assert result.get("status") in ("completed", "mode_switch")
 

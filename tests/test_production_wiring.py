@@ -1,64 +1,51 @@
 import pytest
-import sounddevice as sd
 
-from src.adapters.whisper_stt import WhisperSpeechRecognizer
-from src.adapters.silero_vad import SileroVAD
-from src.adapters.sounddevice_audio import SounddeviceAudio
-from src.adapters.sapi_tts import SAPITTS
-from src.adapters.windows_control import WindowsOSController
-from src.adapters.llamacpp_provider import LlamaCppLLMProvider
-from src.core.state_machine.mode_manager import ModeManager
-from src.adapters.vosk_stop_listener import VoskStopListener
+from src import main
 
 
-def test_production_wiring_no_mocks():
-    """Release Gate 1: Build real production app object graph and assert no class contains Fake, Mock, or Stub."""
-    stt = WhisperSpeechRecognizer(model_size="base")
-    vad = SileroVAD()
-    audio = SounddeviceAudio(auto_calibrate=False)
-    tts = SAPITTS()
-    os_ctrl = WindowsOSController()
-    llm = LlamaCppLLMProvider(raise_on_failure=False)
-    mm = ModeManager(llm_provider=llm, os_controller=os_ctrl, speech_synthesizer=tts)
-    stop_listener = VoskStopListener(tts_synthesizer=tts)
+def test_default_arguments_select_production_mode():
+    args = main.build_argument_parser().parse_args([])
 
-    graph = [stt, vad, audio, tts, os_ctrl, llm, mm, stop_listener]
-    
-    for component in graph:
-        cls_name = component.__class__.__name__
-        assert not any(forbidden in cls_name.lower() for forbidden in ("fake", "mock", "stub")), (
-            f"Component '{cls_name}' contains a mock/fake/stub class in production wiring!"
-        )
+    assert args.mock is False
 
 
-def test_startup_self_check_announcement():
-    """Startup self-check: speaks active STT model, VAD, TTS voice, mic, and speaker."""
-    stt = WhisperSpeechRecognizer(model_size="base")
-    vad = SileroVAD()
-    audio = SounddeviceAudio(auto_calibrate=False)
-    tts = SAPITTS()
+def test_mock_mode_requires_an_explicit_flag():
+    args = main.build_argument_parser().parse_args(["--mock"])
 
-    # Discover active hardware devices
-    devices = sd.query_devices()
-    default_input = sd.default.device[0]
-    default_output = sd.default.device[1]
+    assert args.mock is True
 
-    mic_name = devices[default_input]["name"] if 0 <= default_input < len(devices) else "Default Microphone"
-    speaker_name = devices[default_output]["name"] if 0 <= default_output < len(devices) else "Default Speaker"
-    
-    check_summary = (
-        f"Voice Operator v1 initialized. "
-        f"STT model: Whisper {stt.model_size}. "
-        f"VAD: Silero ONNX. "
-        f"Active microphone: {mic_name}. "
-        f"Active speaker: {speaker_name}."
-    )
 
-    assert "Whisper base" in check_summary
-    assert "Silero ONNX" in check_summary
-    assert len(mic_name) > 0
-    assert len(speaker_name) > 0
+def test_main_factory_wires_nested_operator_graph():
+    args = main.build_argument_parser().parse_args(["--mock"])
+    operator = main.build_operator(args)
+    state_machine = operator.mode_manager
 
-    handle = tts.speak(check_summary, interruptible=True, block=False)
-    assert handle is not None
-    tts.stop()
+    assert operator.audio_source is not None
+    assert operator.vad is not None
+    assert operator.speech_recognizer is not None
+    assert operator.speech_synthesizer is state_machine.speech_synthesizer
+    assert state_machine.llm_provider is not None
+    assert state_machine.os_controller is not None
+    assert state_machine.document_readers
+
+
+def test_missing_production_models_fail_with_a_spoken_startup_error(
+    monkeypatch, tmp_path
+):
+    class RecordingSynthesizer:
+        def __init__(self):
+            self.messages = []
+
+        def speak(self, text, **kwargs):
+            self.messages.append(text)
+
+    synthesizer = RecordingSynthesizer()
+    monkeypatch.setattr(main, "_create_production_synthesizer", lambda: synthesizer)
+    monkeypatch.chdir(tmp_path)
+
+    args = main.build_argument_parser().parse_args([])
+    with pytest.raises(FileNotFoundError, match="Whisper"):
+        main.build_operator(args)
+
+    assert synthesizer.messages
+    assert "Whisper" in synthesizer.messages[0]

@@ -199,19 +199,14 @@ class SounddeviceAudio(AudioSource):
             down = self.device_sample_rate // g
             data = sps.resample_poly(data, up, down).astype(np.float32)
 
-        # Convert to int16 amplitude scale [-32768, 32767]
+        # Convert float32 to int16 scale without hard clipping
         if self.device_dtype == "float32":
-            data = data * 32767.0
+            max_val = float(np.max(np.abs(data))) if data.size > 0 else 0.0
+            scale = 30000.0 / max(max_val, 1.0)
+            data = data * scale
 
-        # 4. Gain: Automatic gain normalization to target RMS with limiter
-        frame_rms = float(np.sqrt(np.mean(data.astype(np.float64) ** 2)))
-        target_rms = 3000.0  # Healthy speech operating level in int16 scale
-        if frame_rms > (self.noise_floor * 0.8) and frame_rms > 10.0:
-            gain = np.clip(target_rms / max(frame_rms, 1.0), 0.5, 10.0)
-            data = data * gain
-
-        # Peak limiter to eliminate distortion
-        data = np.clip(data, -32000.0, 32000.0)
+        # Peak limiter to int16 range
+        data = np.clip(data, -32767.0, 32767.0)
         payload = np.asarray(data, dtype=np.int16).tobytes()
 
         try:
@@ -304,8 +299,13 @@ class SounddeviceAudio(AudioSource):
     def start_stream(self, calibrate: bool = False) -> None:
         """Start microphone capture stream, preferring user selection, then Windows default.
         Falls back to other devices only if opening fails, and announces which device is in use.
+        Maintains a persistent stream across utterances.
         """
         if self._stream is not None:
+            if hasattr(self._stream, "active") and self._stream.active:
+                if calibrate and self.auto_calibrate and not self.calibrated:
+                    self.calibrate(duration=3.0)
+                return
             self.stop_stream()
         self._audio_queue = queue.Queue(maxsize=128)
 
@@ -352,7 +352,7 @@ class SounddeviceAudio(AudioSource):
                     f"Fallback errors: {'; '.join(fallback_errors)}"
                 ) from error
 
-        if calibrate and self.auto_calibrate:
+        if calibrate and self.auto_calibrate and not self.calibrated:
             self.calibrate(duration=3.0)
 
     def flush(self) -> None:

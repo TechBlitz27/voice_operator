@@ -128,9 +128,10 @@ class WindowsOSController(OSController):
         return visible_windows
 
     def find_windows_for_target(self, target: str) -> List[Dict[str, Any]]:
-        """Resolves target by process name first, then by title match using fuzz.ratio >= 85."""
+        """Resolves target by process name first; only falls back to title match for non-known-app targets."""
         t_clean = target.lower().strip()
         all_windows = self.enumerate_visible_windows()
+        is_known_app = t_clean in APP_MAPPINGS
         expected_exe = APP_MAPPINGS.get(t_clean, t_clean)
         if not expected_exe.endswith(".exe") and not expected_exe.startswith("http"):
             expected_exe = f"{expected_exe}.exe"
@@ -139,6 +140,10 @@ class WindowsOSController(OSController):
         by_process = [w for w in all_windows if w["process_name"].lower() == expected_exe.lower()]
         if by_process:
             return by_process
+
+        if is_known_app:
+            # Never fall back to title substring matching for known application targets
+            return []
 
         # 2. Match by title fuzz.ratio >= 85 or direct substring
         by_title = []
@@ -267,7 +272,8 @@ class WindowsOSController(OSController):
         """Closes application, checking for unsaved changes dialog and verifying window no longer exists."""
         windows = self.find_windows_for_target(target)
         if not windows:
-            return {"success": False, "spoken_message": f"Window for {target} not found."}
+            msg = f"Window for {target} not found."
+            return {"success": False, "spoken_message": msg, "error_message": msg}
 
         if len(windows) > 1 and not force:
             # Multi-window check
@@ -285,9 +291,8 @@ class WindowsOSController(OSController):
 
         if force:
             try:
-                _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                proc = psutil.Process(pid)
-                proc.kill()
+                # Force-close the specific single window (WM_DESTROY), never kill the entire process
+                win32gui.PostMessage(hwnd, win32con.WM_DESTROY, 0, 0)
                 time.sleep(0.5)
                 return {"success": True, "spoken_message": f"Force closed {target}."}
             except Exception as e:
@@ -299,12 +304,23 @@ class WindowsOSController(OSController):
 
         # Post-condition check: IsWindow still true?
         if win32gui.IsWindow(hwnd):
-            # Check if dialog appeared
+            # Check if dialog appeared specifically belonging to the target process
             dialog_found = False
-            for w in self.enumerate_visible_windows():
-                if w["class_name"] == "#32770" or "save" in w["title"].lower():
-                    dialog_found = True
-                    break
+            try:
+                _, target_pid = win32process.GetWindowThreadProcessId(hwnd)
+            except Exception:
+                target_pid = None
+
+            if target_pid:
+                for w in self.enumerate_visible_windows():
+                    try:
+                        _, w_pid = win32process.GetWindowThreadProcessId(w["hwnd"])
+                    except Exception:
+                        continue
+                    if w_pid == target_pid and (w["class_name"] == "#32770" or "save" in w["title"].lower()):
+                        dialog_found = True
+                        break
+
             if dialog_found:
                 return {
                     "success": False,
@@ -318,11 +334,60 @@ class WindowsOSController(OSController):
 
         return {"success": True, "spoken_message": f"Closed {target}."}
 
+    def resolve_window_selection(self, target: str, selection: str) -> Dict[str, Any]:
+        """Handles disambiguation when multiple windows match target ('first', 'second', 'third', 'close all')."""
+        windows = self.find_windows_for_target(target)
+        if not windows:
+            msg = f"Window for {target} not found."
+            return {"success": False, "spoken_message": msg, "error_message": msg}
+
+        selection_clean = selection.lower().strip()
+        ordinal_map = {
+            "first": 0, "1st": 0, "one": 0, "1": 0,
+            "second": 1, "2nd": 1, "two": 1, "2": 1,
+            "third": 2, "3rd": 2, "three": 2, "3": 2,
+        }
+
+        if selection_clean in ("close all", "all"):
+            closed_count = 0
+            for w in windows:
+                hwnd = w["hwnd"]
+                win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                closed_count += 1
+            return {
+                "success": True,
+                "closed_count": closed_count,
+                "spoken_message": f"Closed all {closed_count} windows of {target}."
+            }
+
+        if selection_clean in ordinal_map:
+            idx = ordinal_map[selection_clean]
+            if idx >= len(windows):
+                return {
+                    "success": False,
+                    "spoken_message": f"{target} only has {len(windows)} windows."
+                }
+            target_win = windows[idx]
+            hwnd = target_win["hwnd"]
+            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+            return {
+                "success": True,
+                "closed_hwnd": hwnd,
+                "window_index": idx,
+                "spoken_message": f"Closed the {selection_clean} window of {target}."
+            }
+
+        return {
+            "success": False,
+            "spoken_message": f"Invalid selection '{selection}'. Say first, second, third, or close all."
+        }
+
     def _switch_application(self, target: str) -> Dict[str, Any]:
         """Switches foreground focus to target, restoring if minimized, and verifies GetForegroundWindow."""
         windows = self.find_windows_for_target(target)
         if not windows:
-            return {"success": False, "spoken_message": f"Window for {target} not found."}
+            msg = f"Window for {target} not found."
+            return {"success": False, "spoken_message": msg, "error_message": msg}
 
         if len(windows) > 1:
             print(f"[WindowsControl] Target '{target}' has {len(windows)} windows.")
@@ -368,7 +433,8 @@ class WindowsOSController(OSController):
     def _minimize_application(self, target: str) -> Dict[str, Any]:
         windows = self.find_windows_for_target(target)
         if not windows:
-            return {"success": False, "spoken_message": f"Window for {target} not found."}
+            msg = f"Window for {target} not found."
+            return {"success": False, "spoken_message": msg, "error_message": msg}
         hwnd = windows[0]["hwnd"]
         win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         time.sleep(0.2)
@@ -380,7 +446,8 @@ class WindowsOSController(OSController):
     def _maximize_application(self, target: str) -> Dict[str, Any]:
         windows = self.find_windows_for_target(target)
         if not windows:
-            return {"success": False, "spoken_message": f"Window for {target} not found."}
+            msg = f"Window for {target} not found."
+            return {"success": False, "spoken_message": msg, "error_message": msg}
         hwnd = windows[0]["hwnd"]
         win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
         time.sleep(0.2)
@@ -405,8 +472,8 @@ class WindowsOSController(OSController):
 
     def type_text(self, text: str) -> bool:
         """Injects text into active window using SendInput Unicode."""
-        if not text:
-            return False
+        if text == "":
+            return True
         if text == "ctrl+z":
             import keyboard
             keyboard.send("ctrl+z")

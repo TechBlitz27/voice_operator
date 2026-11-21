@@ -3,7 +3,7 @@ import os
 import sys
 import threading
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 import numpy as np
 
 try:
@@ -28,18 +28,23 @@ class VoskStopListener:
         on_command: Optional[Callable[[str], None]] = None,
         tts_synthesizer: Optional[Any] = None,
         hotkey: str = "ctrl+alt+space",
-        model_path: Optional[str] = None
+        model_path: Optional[str] = None,
+        input_device: Optional[Any] = None,
+        debounce_seconds: float = 1.5,
     ):
         self.on_stop = on_stop
         self.on_command = on_command
         self.tts = tts_synthesizer
         self.hotkey = hotkey
+        self.input_device = input_device
+        self.debounce_seconds = debounce_seconds
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._stream = None
         self._model = None
         self._recognizer = None
+        self._last_trigger_time: float = 0.0
 
         # Echo mitigation tracking
         self.rolling_tts_rms = 0.005
@@ -84,7 +89,12 @@ class VoskStopListener:
             print(f"[STOP_LISTENER] Warning: could not bind global hotkey '{self.hotkey}': {e}")
 
     def trigger_stop(self) -> None:
-        """Executes emergency stop across TTS and active operations in under 300 ms."""
+        """Executes emergency stop across TTS and active operations."""
+        now = time.time()
+        if (now - self._last_trigger_time) < self.debounce_seconds:
+            return
+        self._last_trigger_time = now
+
         t_start = time.perf_counter()
         print("[STOP_LISTENER] EMERGENCY STOP TRIGGERED!")
 
@@ -103,7 +113,7 @@ class VoskStopListener:
                 print(f"[STOP_LISTENER] Error in on_stop callback: {e}")
 
         latency_ms = (time.perf_counter() - t_start) * 1000.0
-        print(f"[STOP_LISTENER] Stop handled in {latency_ms:.2f} ms (< 300 ms requirement met).")
+        print(f"[STOP_LISTENER] Stop handled in {latency_ms:.2f} ms.")
 
     def start(self) -> None:
         """Starts the dedicated audio capture and recognition thread."""
@@ -137,7 +147,8 @@ class VoskStopListener:
                 samplerate=16000,
                 blocksize=3200,  # 200 ms chunks
                 dtype='int16',
-                channels=1
+                channels=1,
+                device=self.input_device
             ) as stream:
                 self._stream = stream
                 while self._running:
@@ -182,19 +193,17 @@ class VoskStopListener:
         cmd = words[0]
         now = time.time()
 
-        # Echo Mitigation Checks:
+        # Echo Mitigation: Duck TTS volume when speaking
         if is_tts_playing:
-            # (c) Ignore matches that start within 150 ms of TTS start
+            if hasattr(self.tts, "set_volume"):
+                try:
+                    self.tts.set_volume(20)  # Duck TTS volume while listening
+                except Exception:
+                    pass
+            # Ignore matches that start within 150 ms of TTS start
             tts_start = getattr(self.tts, "tts_start_time", 0.0)
             if (now - tts_start) < 0.150:
                 print(f"[STOP_LISTENER] Echo mitigation: ignored '{cmd}' within 150 ms of TTS start.")
-                return
-
-            # (b) Require stop word to be at least 12 dB above rolling TTS reference level
-            # 12 dB = factor of ~3.98
-            ratio = self.last_audio_rms / max(1e-5, self.rolling_tts_rms)
-            if ratio < 3.98:
-                print(f"[STOP_LISTENER] Echo mitigation: dropped '{cmd}' (RMS {self.last_audio_rms:.4f} not >= 12 dB above TTS reference {self.rolling_tts_rms:.4f}, ratio: {ratio:.2f} < 3.98)")
                 return
 
         if cmd == "stop":

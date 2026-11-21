@@ -204,6 +204,14 @@ class WhisperSpeechRecognizer(SpeechRecognizer):
                     unique_texts.append(t)
             transcription = " ".join(unique_texts).strip()
 
+            # Filter Whisper output equal to the initial_prompt
+            clean_transcription = transcription.strip().lower()
+            clean_prompt = self._command_initial_prompt.strip().lower()
+            clean_prefix = COMMAND_PROMPT_PREFIX.strip().lower()
+            if clean_transcription and (clean_transcription == clean_prompt or clean_transcription == clean_prefix):
+                print(f"[STT] Filtered Whisper output equal to initial_prompt: '{transcription}'")
+                return ""
+
             # Hallucination Gate
             # Gate 1: Check no_speech_prob > 0.6 and avg_logprob < -1.0
             if self.last_no_speech_prob > 0.6:

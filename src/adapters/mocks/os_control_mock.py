@@ -40,3 +40,13 @@ class MockOSController(OSController):
         self.typed_inputs.append(text)
         print(f"[MOCK OS] Typing text into active app ({self.active_app}): '{text}'")
         return True
+
+    def resolve_window_selection(self, target: str, selection: str) -> Dict[str, Any]:
+        selection_clean = selection.lower().strip()
+        ordinal_map = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2}
+        if selection_clean in ("close all", "all"):
+            return {"success": True, "closed_count": 3, "spoken_message": f"Closed all windows of {target}."}
+        if selection_clean in ordinal_map:
+            idx = ordinal_map[selection_clean]
+            return {"success": True, "closed_hwnd": 5001 + idx, "window_index": idx, "spoken_message": f"Closed {selection_clean} window of {target}."}
+        return {"success": False, "spoken_message": f"Invalid selection: {selection}"}

@@ -1,3 +1,4 @@
+import sys
 import time
 import threading
 from typing import Optional, List
@@ -49,10 +50,13 @@ class MockSpeechRecognizer(SpeechRecognizer):
             print(f"[MOCK STT] Transcribed queued voice input: '{text}'")
             return text
             
-        # Fallback to interactive console typing if no transcription is queued
-        print("\n--- [MOCK MIC] Speak now (type your command/dictation and press enter):")
-        text = input("User voice input: ")
-        return text
+        # Read piped commands in non-interactive / automated subprocesses
+        if sys.stdin and not sys.stdin.isatty():
+            line = sys.stdin.readline()
+            if not line:
+                raise EOFError("End of piped input")
+            return line.strip()
+        return ""
 
 
 class MockDocumentReader:

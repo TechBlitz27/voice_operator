@@ -19,7 +19,7 @@ def run_operator(*commands: str, timeout: float = 15.0) -> str:
     env["PYTHONUNBUFFERED"] = "1"
 
     result = subprocess.run(
-        [sys.executable, "-m", "src.main"],
+        [sys.executable, "-m", "src.main", "--mock"],
         input=payload,
         text=True,
         capture_output=True,

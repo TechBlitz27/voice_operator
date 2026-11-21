@@ -28,3 +28,7 @@ class OSController(ABC):
             True if text injection succeeded, False otherwise.
         """
         pass
+
+    def resolve_window_selection(self, target: str, selection: str) -> Dict[str, Any]:
+        """Handles disambiguation when multiple windows match target ('first', 'second', 'third', 'close all')."""
+        return {"success": False, "error_message": "Not implemented"}

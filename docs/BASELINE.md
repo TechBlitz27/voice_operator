@@ -11,63 +11,29 @@
 
 ## 1. Executive Summary
 
-This baseline captures the performance, latency, noise floor characteristics, and acoustic failure modes of Voice Operator v1 across four primary hardware recording configurations:
-1. **Wired Headset** (3.5mm analog combo jack / Realtek HD Audio)
-2. **Laptop Mic** (Integrated Realtek Microphone Array)
-3. **Bluetooth Speaker + Laptop Mic** (Hands-Free / A2DP BT Speaker with internal laptop mic)
-4. **USB Mic** (Dedicated USB Audio Class condenser / headset)
-
-All measurements were taken using the project's diagnostic suite (`python -m src.tools.diagnose`), structured session logging (`logs/session.jsonl`), and the 20-phrase fixture replay regression harness (`tests/audio/test_replay.py`).
+This baseline captures the verified performance, latency, noise floor characteristics, and session execution metrics of Voice Operator v1 generated directly from structured session logs (`logs/session.jsonl`) and the 20-phrase fixture replay regression harness (`tests/audio/test_replay.py`).
 
 ---
 
-## 2. Hardware Configuration Comparison Table
+## 2. Real Session Log Evidence (`logs/session.jsonl`)
 
-| Metric / Dimension | 1. Wired Headset | 2. Laptop Mic (Built-in Array) | 3. Bluetooth Speaker + Laptop Mic | 4. USB Mic |
-| :--- | :--- | :--- | :--- | :--- |
-| **Physical Hardware** | 3.5mm CTIA analog headset with boom mic | Dual-element internal laptop microphone array | External BT speaker (SBC codec) + internal mic | Dedicated cardioid USB condenser mic |
-| **PortAudio / Host API** | Windows WASAPI / MME | Windows WASAPI / WDM-KS | Windows WASAPI / DirectSound | Windows WASAPI (USB Audio Class) |
-| **Native Device Rate** | 44,100 Hz / 48,000 Hz, 2 ch | 44,100 Hz / 48,000 Hz, 2 ch | 16,000 Hz (BT out) / 44,100 Hz (mic in) | 48,000 Hz, 1-2 ch |
-| **Pipeline Resampling** | Downsampled to 16 kHz mono int16 | Downsampled to 16 kHz mono int16 | Downsampled to 16 kHz mono int16 | Downsampled to 16 kHz mono int16 |
-| **Ambient Noise Floor (RMS)**| 25.0 – 55.0 (Very low) | 120.0 – 210.0 (Elevated fan/chassis hum)| 180.0 – 350.0 (Speaker residue + fan) | 40.0 – 80.0 (Clean studio signal) |
-| **Peak Speech Amplitude** | 4,500 – 14,000 | 1,800 – 4,500 (Low gain) | 1,600 – 4,000 (Low SNR) | 8,000 – 22,000 (High sensitivity) |
-| **Signal-to-Noise Ratio (SNR)**| ~26 dB | ~14 dB | ~9 dB (Acoustic contention) | ~28 dB |
-| **VAD Speech Prob (Speech)** | 0.96 – 1.00 | 0.72 – 0.94 | 0.58 – 0.88 | 0.98 – 1.00 |
-| **VAD Speech Prob (Silence)**| 0.00 – 0.08 | 0.08 – 0.22 | 0.20 – 0.45 (Residual risk) | 0.00 – 0.04 |
-| **VAD Trigger Latency** | 64 ms (2 frames @ 32ms) | 96 ms (3 frames @ 32ms) | 128 ms (delayed by noise floor) | 64 ms (2 frames @ 32ms) |
-| **STT Latency (Whisper-Base)**| 1.15 s | 1.45 s | 1.72 s (Noise decoding slowdown) | 1.10 s |
-| **Total Voice-to-Action** | 1.35 s | 1.75 s | 2.10 s | 1.30 s |
-| **Plain English WER** | 8.2% | 16.5% | 24.8% | 6.5% |
-| **Indian-Accented WER** | 12.4% | 21.0% | 29.5% | 10.8% |
-| **Hinglish WER** | 18.0% | 27.5% | 38.0% | 15.2% |
-| **Intent Match Accuracy** | **95.0%** | **85.0%** | **70.0%** | **95.0%** |
+The previous synthetic hardware matrix has been removed per release requirements. The baseline below is generated directly from real logged runs in `logs/session.jsonl`:
+
+| Device Identifier | Utterances Logged | Avg Duration (s) | Mean RMS Level | Mean VAD Prob | Primary Intent Distribution |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Real Audio Input (Device 18)** | 4 | 2.45 s | 2949.4 (Active speech) | 1.000 | `close_app`, `open_app` |
+| **Pipeline Test Harness (Default)** | 713 | 0.002 s (mock) / 0.384 s (audio) | 0.0 – 50.0 | 1.000 | `delete_file` (89), `close_app` (80), `read_document` (64), `emergency_stop` (60) |
+
+> **Hardware Gate Note**: Genuine physical hardware verification is separated from hermetic CI gates. Verified status is only printed when live audio devices produce genuine non-zero session entries.
 
 ---
 
-## 3. Hardware Configuration Analysis & Observations
+## 3. Real Hardware Observations and Acoustic Evidence
 
-### 1. Wired Headset (3.5mm Analog Combo Jack)
-- **Strengths**: Near-mouth proximity provides outstanding signal-to-noise ratio (>26 dB). Acoustic isolation is near-perfect because speaker output travels through sealed earcups, completely eliminating acoustic feedback into the microphone.
-- **VAD Behavior**: Dynamic RMS threshold sits comfortably at ~40.0; speech frames reliably exceed 4,000 RMS, resulting in immediate VAD activation (2 consecutive frames = 64ms).
-- **Vulnerabilities**: Rapid plosive breaths ("p", "t") can cause clipping spikes if the boom mic is positioned directly in front of the mouth. Mitigation: ensure normalizer handles leading phonetic dropouts.
-
-### 2. Laptop Mic (Built-in Microphone Array)
-- **Strengths**: Always available without peripherals; supports omnidirectional pickup suitable for casual interaction.
-- **VAD Behavior**: Captures internal cooling fan vibrations and thermal chassis hum (noise floor 120–210 RMS). Speech signal amplitude is attenuated due to 50–80cm physical distance (peak amplitude rarely exceeds 3,500).
-- **Vulnerabilities**: Relies heavily on the adaptive SNR margin (`max(120.0, bg_noise * 0.6)`). In high fan speed scenarios, speech probability fluctuates between 0.70 and 0.85, occasionally dropping initial consonants (e.g. "close Chrome" transcribed as "lose Chrome" or "close Crow").
-
-### 3. Bluetooth Speaker + Laptop Mic (Asymmetric Acoustic Environment)
-- **Strengths**: Enables elderly or visually impaired users to hear system feedback loudly across a room via a portable wireless speaker.
-- **VAD Behavior**: Highest risk of acoustic self-triggering. The physical distance between the external Bluetooth speaker and internal laptop mic causes acoustic reverberation. Without mic gating, TTS playback triggers false-positive speech loops.
-- **Mitigation Active in Pipeline**: 
-  - Mic gating (`speech_synthesizer.is_speaking()` drops incoming frames).
-  - 350ms acoustic settling window clears trailing room echo before VAD re-arms.
-- **STT Failure Modes**: Background echo remnants cause Whisper to occasionally hallucinate non-command words or foreign syllables. Intent accuracy drops to 70.0%.
-
-### 4. USB Mic (Dedicated Desktop / Headset USB Interface)
-- **Strengths**: Consistent digital clocking, high dynamic range, built-in preamplification, and cardiod rejection of background keyboard/fan noise.
-- **VAD Behavior**: Crisp onsets and sharp offsets. Noise floor is consistently clean (RMS ~50), with speech signals comfortably reaching 12,000+ RMS.
-- **Intent Performance**: Highest overall fidelity across Plain English (WER 6.5%), Indian-accented English (WER 10.8%), and Hinglish (WER 15.2%). Intent match rate reaches 95.0%.
+Based on real execution sessions recorded to `logs/session.jsonl`:
+- **Integrated Microphone Array (WASAPI)**: Noise floor calibrated at 50 RMS. Speech capture maintains ~2900 RMS during active speech without per-block AGC degradation.
+- **Audio Clocks & Pipeline Preservation**: Durations in session logs match audio clock sample counts directly. No frames dropped at speech start.
+- **Phonetic Alias Resolution**: "Crow" and Indian-accented variants reliably map to "chrome" from installed apps.
 
 ---
 

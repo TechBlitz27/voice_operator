@@ -86,6 +86,10 @@ class ModeManager(StateMachine):
         self._pending_confirmation_action: Optional[ExecutorAction] = None
         self._pending_confirmation_time: float = 0.0
 
+        # Multi-window disambiguation state
+        self._pending_disambiguation_target: Optional[str] = None
+        self._pending_disambiguation_time: float = 0.0
+
         # Dictation mode state
         self.dictation_lock_hwnd: int = 0
         self.dictation_lock_title: str = ""
@@ -110,6 +114,16 @@ class ModeManager(StateMachine):
         if mode != "reading" and self.current_mode == "reading":
             self._stop_reading_playback()
         self.current_mode = mode
+
+    def clear_pending_confirmation(self) -> None:
+        self._pending_confirmation_action = None
+        self._pending_confirmation_time = 0.0
+        self._pending_disambiguation_target = None
+        self._pending_disambiguation_time = 0.0
+
+    def emergency_stop(self) -> None:
+        self.clear_pending_confirmation()
+        self.set_mode("command")
 
     def reset_attention(self) -> None:
         """Opens or extends the 6s attention window."""
@@ -144,7 +158,30 @@ class ModeManager(StateMachine):
 
             if not self.is_in_attention_window() and self.current_mode == "command":
                 print(f"[ModeManager] Ambient speech dropped outside attention window: '{raw_text}' (Say 'Hey Operator' or launch with --always-listening)")
+                self.speech_synthesizer.speak("Please say Hey Operator.")
                 return {"status": "dropped_outside_attention_window"}
+
+        # Handle active multi-window disambiguation
+        if self._pending_disambiguation_target is not None:
+            if (time.time() - self._pending_disambiguation_time) > 6.0:
+                self._pending_disambiguation_target = None
+                self._pending_disambiguation_time = 0.0
+            else:
+                target = self._pending_disambiguation_target
+                disambiguation_terms = {
+                    "first", "1st", "one", "1",
+                    "second", "2nd", "two", "2",
+                    "third", "3rd", "three", "3",
+                    "close all", "all",
+                }
+                if cleaned in disambiguation_terms:
+                    self._pending_disambiguation_target = None
+                    self._pending_disambiguation_time = 0.0
+                    res = self.os_controller.resolve_window_selection(target, cleaned)
+                    spoken = res.get("spoken_message", "")
+                    if spoken:
+                        self.speech_synthesizer.speak(spoken)
+                    return {"status": "window_disambiguated", "result": res}
 
         # Handle active confirmations
         if self._pending_confirmation_action is not None:
@@ -162,23 +199,26 @@ class ModeManager(StateMachine):
         now = time.time()
         if now - self._pending_confirmation_time > 6.0:
             print("[ModeManager] Confirmation timed out after 6.0s.")
-            self._pending_confirmation_action = None
-            self.speech_synthesizer.speak("Confirmation timed out. Action cancelled.")
+            self.clear_pending_confirmation()
+            self.speech_synthesizer.speak("Confirmation timed out. Action canceled.")
             return {"status": "confirmation_timed_out"}
 
-        words = set(cleaned.split())
-        if words.intersection(CONFIRM_YES_SET):
+        response = cleaned.strip().lower()
+        if response in CONFIRM_YES_SET:
             action = self._pending_confirmation_action
-            self._pending_confirmation_action = None
-            print(f"[ModeManager] Action confirmed: {action.action}")
+            print(f"[ModeManager] User confirmed action '{action.action}'.")
+            self.clear_pending_confirmation()
             return self._execute_action_with_feedback(action)
-        elif words.intersection(CONFIRM_NO_SET):
-            self._pending_confirmation_action = None
-            self.speech_synthesizer.speak("Action cancelled.")
+        elif response in CONFIRM_NO_SET:
+            action_name = self._pending_confirmation_action.action if self._pending_confirmation_action else ""
+            print(f"[ModeManager] User canceled/rejected action '{action_name}'.")
+            self.clear_pending_confirmation()
+            self.speech_synthesizer.speak("Action canceled.")
             return {"status": "confirmation_rejected"}
         else:
-            self.speech_synthesizer.speak("Please say yes to confirm or no to cancel.")
-            return {"status": "awaiting_confirmation"}
+            self.clear_pending_confirmation()
+            self.speech_synthesizer.speak("Pending confirmation canceled.")
+            return self.route_transcript(cleaned)
 
     def route(self, validated_intent: Dict[str, Any], raw_text: str = "") -> Dict[str, Any]:
         """Validates confirmation requirements and triggers execution with OSController."""
@@ -299,7 +339,12 @@ class ModeManager(StateMachine):
                 elif action_name == "switch_app":
                     self.speech_synthesizer.speak(f"Switched to {executor_action.target}.")
         else:
-            if result.get("error_type") == "dialog_detected" and action_name == "close_app":
+            if action_name == "close_app" and "Say first, second or third" in result.get("spoken_message", ""):
+                self._pending_disambiguation_target = executor_action.target
+                self._pending_disambiguation_time = time.time()
+                self.speech_synthesizer.speak(result["spoken_message"])
+                return {"status": "awaiting_window_disambiguation", "action": executor_action.model_dump()}
+            elif result.get("error_type") == "dialog_detected" and action_name == "close_app":
                 self._pending_confirmation_action = ExecutorAction(
                     intent_confidence=1.0,
                     action="close_app",

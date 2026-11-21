@@ -29,6 +29,7 @@ logs/audio/
 # Local model weights (download separately)
 models/**/*.gguf
 models/**/model.bin
+!docs/evidence/*.log
 
 # Operating system files
 .DS_Store

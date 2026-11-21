@@ -56,16 +56,14 @@ async def test_emergency_stop_clears_pending_confirmation():
     # 1. Enter confirmation state
     recognizer.queue_transcription("delete secret.docx")
     await orch.run_single_step()
-    assert orch.confirm_state == "action_confirm"
-    assert orch.pending_confirm_action is not None
+    assert mm._pending_confirmation_action is not None
     
     # 2. Trigger emergency stop
     recognizer.queue_transcription("stop")
     await orch.run_single_step()
     
     # 3. Confirmation state must be cleared and reset
-    assert orch.confirm_state is None
-    assert orch.pending_confirm_action is None
+    assert mm._pending_confirmation_action is None
     # Deletion action must not have run
     assert not any(act["action"] == "delete_file" for act in os_ctrl.executed_actions)
 

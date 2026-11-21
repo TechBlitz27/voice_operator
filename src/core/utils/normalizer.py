@@ -204,6 +204,8 @@ class CommandNormalizer:
                 (r"^\blord's\s+word\b", "close word"),
                 (r"\b(?:that\s+they\s+|so\s+)?(?:stop|stopped|so|scorp)\s+(?:dictation|dictating|objectation|option|bictition)\b", "stop dictating"),
                 (r"\b(?:stop|stopped)\s+(?:typing|type|writing)\b", "stop dictating"),
+                (r"\b(?:close|open|switch(?:\s+to)?)\s+crow\b", lambda m: m.group(0).lower().replace("crow", "chrome")),
+                (r"\bcrow\b", "chrome"),
             ]
             for pattern, replacement in phonetic_prefixes:
                 match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -262,6 +264,9 @@ class CommandNormalizer:
             "google chrome": "chrome",
             "chrome browser": "chrome",
             "chrome": "chrome",
+            "crow": "chrome",
+            "crome": "chrome",
+            "cro": "chrome",
             "chat gpt": "chrome",
             "chatgpt": "chrome",
             "gpt": "chrome",
