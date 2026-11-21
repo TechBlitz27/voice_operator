@@ -1,0 +1,57 @@
+# Hindi Command Lexicon for Voice Operator v1
+# Maps Devanagari and Latin-transliterated Hindi command words to canonical English command keywords.
+
+verbs:
+  # Open commands
+  "खोलो": "open"
+  "kholo": "open"
+  "kholiye": "open"
+  "khol": "open"
+  "khol do": "open"
+  "khol dain": "open"
+  
+  # Close commands
+  "बंद करो": "close"
+  "band karo": "close"
+  "band kijiye": "close"
+  "band kar do": "close"
+  "band": "close"
+  "बंद": "close"
+  
+  # Switch commands
+  "बदलो": "switch"
+  "badlo": "switch"
+  "badliye": "switch"
+  
+  # Start / Begin
+  "शुरू करो": "start"
+  "shuru karo": "start"
+  "chalu karo": "start"
+  "चालू करो": "start"
+  
+  # Stop / Pause / Resume
+  "रोक दो": "stop"
+  "roko": "stop"
+  "rok do": "stop"
+  "रुको": "stop"
+  "ruko": "stop"
+  "ruk jao": "stop"
+  "thehro": "pause"
+  "aage badho": "resume"
+  "fir se": "repeat"
+  
+  # Read
+  "पढ़ो": "read"
+  "padho": "read"
+  "padhiye": "read"
+  "padh do": "read"
+
+control:
+  "हाँ": "yes"
+  "हां": "yes"
+  "haan": "yes"
+  "ha": "yes"
+  "sahi": "yes"
+  "नहीं": "no"
+  "nahi": "no"
+  "na": "no"
