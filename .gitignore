@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Runtime data (keep test audio fixtures tracked)
+logs/session.jsonl
+logs/audio/
+*.log
+
+# Optional local LLM weights
+models/*.gguf
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
