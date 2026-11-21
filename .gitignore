@@ -26,8 +26,9 @@ logs/session.jsonl
 logs/audio/
 *.log
 
-# Optional local LLM weights
-models/*.gguf
+# Local model weights (download separately)
+models/**/*.gguf
+models/**/model.bin
 
 # Operating system files
 .DS_Store

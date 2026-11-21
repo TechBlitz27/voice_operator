@@ -68,6 +68,8 @@ Ensure the following files/directories are downloaded and placed inside `./model
 2. **CTranslate2 Whisper model**: `models/whisper-base/`. Production mode never downloads models at runtime.
 3. **LLM GGUF model**: `models/qwen2.5-3b-instruct.Q4_K_M.gguf` (the default targeted LLM model).
 
+Large Whisper and LLM weight files are intentionally excluded from GitHub to keep the repository cloneable. Download them separately into the paths above before running production mode.
+
 *Note: If these weights are missing, the production adapters fall back gracefully to terminal-based inputs (STT) and rule-based parsing (LLM) so you can still run the production pipelines without issues.*
 
 ---
