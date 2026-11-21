@@ -50,9 +50,15 @@ class MockSpeechRecognizer(SpeechRecognizer):
             return text
             
         # Fallback to interactive console typing if no transcription is queued
-        print("\n--- [MOCK MIC] Speak now (type your command/dictation and press enter):")
-        text = input("User voice input: ")
-        return text
+        import sys
+        if not sys.stdin or not hasattr(sys.stdin, "isatty") or not sys.stdin.isatty():
+            return ""
+        try:
+            print("\n--- [MOCK MIC] Speak now (type your command/dictation and press enter):")
+            text = input("User voice input: ")
+            return text
+        except (EOFError, OSError):
+            return ""
 
 
 class MockDocumentReader:
